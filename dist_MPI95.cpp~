@@ -1,0 +1,189 @@
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <sstream>
+#include <cmath>
+#include <mpi.h>
+using namespace std;
+
+/*Calcul des meilleures predictions completes
+
+ Meme travail qu'avec le programme dist_MPI.cpp
+Mais on regarde cette fois-ci uniquement les structures de residus completes
+qu'on a auparavant obtenues grace a elim_incomplete_predictions.cpp 
+Remarque : nous avons essaye de creer un header pour la fonction calcul_dist.cpp
+afin d'eviter d'avoir a repeter son code dans chaque programme qui l'appelle,
+toutefois il semble y avoir une incompatibilite du header avec le type string */
+
+
+double dist(std::string s1, std::string s2){
+   s1 = "T0651_results95/"+s1;
+   s2 = "T0651_results95/"+s2;
+   ifstream input1(s1.c_str());
+   ifstream input2(s2.c_str());
+   int r1, r2;//les residus courants des lignes lues dans les fichiers 1 et 2.
+   string line1, line2;
+   getline(input1, line1);
+   getline(input2,line2);
+   istringstream stream1 (line1);
+   istringstream stream2 (line2);
+   string dummy_string;
+   stream1>>dummy_string>>dummy_string>>r1;      
+   stream2>>dummy_string>>dummy_string>>r2;
+   input1.clear();
+   input1.seekg(0, ios::beg);
+   input2.clear();
+   input2.seekg(0, ios::beg);
+   int max_r = max(r1,r2); /*calculer ce max sert a calculer le N qui apparait dans la formule de la dRMSD,
+   car nous avons remarque que deux structures n'ont pas forcement le meme nombre de residus (certains
+   fichiers commencent avec un residu plus grand que 1).
+   Cette etape n'est pas importante ici car tous les fichiers ont 95 residus, ie r1 = r2 = 1
+   */
+   int N = 95 - max_r +1;//on prend donc les residus communs aux 2 fichiers.
+   double ** m1 = new double*[N];
+   for (int k = 0; k<N; ++k){
+      m1[k] = new double[3];
+   }//m1 est une matrice donc chaque ligne comporte les coordonnees du CA d'un residu, du fichier 1.
+   double ** m2 = new double*[N];
+   for (int k = 0; k<N; ++k){
+      m2[k] = new double[3];
+   }//m2 est une matrice donc chaque ligne comporte les coordonnees du CA d'un residu, du fichier 2.
+   
+   int compt = 0;//sert pour savoir quel residu on lit.
+   while ( getline(input1,line1) ){
+      while (r1<max_r){
+         getline(input1,line1);
+         r1 +=1;
+      } /*si le fichier 2 a moins de residus que le 1(ie r1<max_r), on fait une boucle pour lire des lignes
+      du fichier 1 afin de se mettre au meme niveau dans les deux fichiers.
+      */
+      /*
+      au plus une des deux boucles while (r1<max_r) et while (r2<max_r) (plus bas) sera lue.
+      */
+      istringstream stream1 (line1);
+      stream1>>dummy_string>>dummy_string>>r1>>m1[compt][0]>>m1[compt][1]>>m1[compt][2];
+      compt += 1;  
+   }
+
+   compt = 0;
+   while ( getline(input2,line2) ){
+      while (r2<max_r){
+         getline(input2,line2);
+         r2 +=1;
+      } /*si le fichier 1 a moins de residus que le 2(ie r2<max_r), on fait une boucle pour lire des lignes
+      du fichier 2 afin de se mettre au meme niveau dans les deux fichiers.
+      */
+      istringstream stream2 (line2);
+      stream2>>dummy_string>>dummy_string>>r2>>m2[compt][0]>>m2[compt][1]>>m2[compt][2];
+      compt += 1;  
+   }
+     
+    double sum = 0.;
+    for (int i =0; i<N;++i){
+       for (int j =i+1; j<N;++j){
+          double d1 = sqrt( (m1[i][0]-m1[j][0])*(m1[i][0]-m1[j][0]) +
+                (m1[i][1]-m1[j][1])*(m1[i][1]-m1[j][1])+(m1[i][2]-m1[j][2])*(m1[i][2]-m1[j][2]) );
+          double d2 = sqrt( (m2[i][0]-m2[j][0])*(m2[i][0]-m2[j][0]) +
+                (m2[i][1]-m2[j][1])*(m2[i][1]-m2[j][1])+(m2[i][2]-m2[j][2])*(m2[i][2]-m2[j][2]) );
+          sum += (d1 - d2)*(d1 - d2);
+       }
+    }
+    double r = ((double) N)*(((double) N) - 1.);
+    return sum/r;
+}
+
+///////////////////////////////////////
+
+/* Tri bulle pour avoir les 10 plus petites valeurs de prediction,
+qu'on place en fin de tableau. De meme pour leurs indices variant entre 0 et 425
+ */
+
+void sort_10(int* indice, double* value, int k){
+      for (int j=0;j<10;++j){         
+         for (int i =0; i<k-j-1;++i){
+            if (value[i]<value[i+1]){
+               int temp = indice[i];
+               double temp_d = value[i];
+               indice[i] = indice[i+1];
+               indice[i+1]=temp;
+               value[i] = value[i+1];
+               value[i+1] = temp_d;
+            }
+         }
+      }
+}
+               
+///////////////////////////////////////
+/* Chaque processeur calcule une partie des distances, puis selectionne les 10 meilleures distances
+qu'il place en fin de tableau local
+Il recupere egalement les indices 0 <= i <= 425 correspondant a ces dix meilleures predictions 
+Un indice equivaut a la donnee d'une chaine de caracteres T0651TSXXXXX
+Cette equivalence est donnee dans le tableau predictionId
+*/
+
+int main (int argc, char* argv[]){
+   int DataSize = 425;
+   string * predictionId = new string[DataSize];
+   ifstream filenames("filenames_results95.txt");
+   int i = 0;
+   string filename;
+   while ( getline(filenames,filename) ){
+      predictionId[i] = filename;
+      i +=1;
+   }  
+   
+   int numtasks, taskid ;   
+   MPI_Init(&argc, &argv);
+   const int root = 0;
+   MPI_Comm_rank(MPI_COMM_WORLD,&taskid);
+   MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
+   
+   int myDataLength = DataSize/numtasks;
+   if (taskid==numtasks-1) {myDataLength += DataSize%numtasks;};
+   
+   int myIndex[myDataLength];
+   for (int i =0;i<myDataLength;++i){
+      myIndex[i] = taskid*DataSize/numtasks + i;
+   }
+   
+   double myPrediction[myDataLength];
+   for (int i =0;i<myDataLength;++i){
+      string s = predictionId[taskid*DataSize/numtasks+i];
+      myPrediction[i] = dist("target.pdb_result.txt",s);
+   }
+   
+   sort_10(myIndex, myPrediction, myDataLength);    
+   
+   double local10Prediction[10];
+   int local10Index[10];
+   for (int i =0;i<10;++i){
+      local10Prediction[i] = myPrediction[myDataLength-i-1];
+      local10Index[i] = myIndex[myDataLength-i-1];
+   }
+      
+   int bestIndex[10*numtasks];
+   double bestPrediction[10*numtasks];
+   
+   
+   MPI_Gather(local10Index, 10, MPI_INT, bestIndex, 10, MPI_INT, root, MPI_COMM_WORLD);
+   MPI_Gather(local10Prediction, 10, MPI_DOUBLE, bestPrediction, 10,MPI_DOUBLE, root, MPI_COMM_WORLD);
+   
+   string finalBestId[10];
+   double finalBestPrediction[10];
+   if (taskid ==0){
+      sort_10(bestIndex, bestPrediction, 10*numtasks);
+      cout << "Les dix meilleures predictions sont : "<<endl;
+      ofstream output("10_Best95.txt");
+      for (int i =0;i<10;++i){
+         finalBestPrediction[i] = bestPrediction[10*numtasks-1-i];
+         string s = predictionId[bestIndex[10*numtasks-1-i]];
+         output << bestIndex[10*numtasks-1-i] << "\n";    // recuperer les indices des dix meilleures predictions
+         finalBestId[i] = s.substr(0,s.size()-13); //pour un affichage du fichier exact correspondant
+         cout <<"Identifiant : "<<finalBestId[i] <<" , dRMSD : "<<finalBestPrediction[i]<<endl;
+      }
+   }
+   MPI_Finalize();
+   return 0;
+}
+
+

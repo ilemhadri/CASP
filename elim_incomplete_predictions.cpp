@@ -1,0 +1,60 @@
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <sstream>
+using namespace std;
+
+
+
+void results(string s){
+   string s1 = "T0651_results/"+s;
+   // T0651_results : dossier contenant la cible et les fichiers de prediction
+   // auparavant traites par le programme read_file.cpp
+   ifstream input(s1.c_str());
+   ofstream myfile;
+   string s2 = "T0651_results95/"+s.substr(0,s.size()-4)+"95.txt";
+   /* T0651_results_95 : dossier contenant les resultats 
+   ie uniquement les predictions completes et la cible
+   i.e les predictions avec 95 residus
+   ce sont ces predictions que l'on utilise pour le clustering
+   */
+   myfile.open(s2.c_str());
+   
+   string line;
+   int residue;
+   string dummy_string; // contient les informations non necessaires
+   getline(input,line);
+   istringstream stream (line);
+   stream>>dummy_string>>dummy_string>>residue;
+   if (residue > 1) return ; //ce fichier de prediction incomplet est elimine
+   input.clear();
+   input.seekg(0, ios::beg);
+     
+   while( getline(input,line) ){
+      istringstream stream (line);
+      double x,y,z;
+      string name;
+      string residue_name;
+      stream>>name>>residue_name>>residue>>x>>y>>z;
+      // on recupere les carbones alpha du domaine 1
+      if (name=="CA" && (residue<=95) ){
+         myfile <<name+" "<<residue_name+" "<<residue<<" "<<x<<" "<<y<<" "<<z<<endl;
+      }
+   }
+}
+
+
+
+
+int main(int argc, char * argv[]){
+   ifstream filenames("filenames_results.txt");
+   // filenames contient tous les noms de fichiers a transformer
+   string filename;
+   while( getline(filenames,filename) ){
+      results(filename);
+   }
+   results("target.pdb_result.txt");
+   return 0;
+}
+         
+      

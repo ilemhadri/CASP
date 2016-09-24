@@ -1,0 +1,8 @@
+Taches manuelles :
+1/ Creer les dossiers T0651_results, T0651_results95
+2/ Compiler et executer read_file et elim_incomplete_predictions puis supprimer les
+fichiers vides des dossiers sus-mentionnes
+3/ Executer des commandes ls > filenames.txt, ls>filenames_results.txt,
+ls>filenames_results95.txt dans les dossiers correspondants
+4/ Supprimer les premieres lignes de ces fichiers, puis les placer dans le
+repertoire principal
